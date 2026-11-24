@@ -135,14 +135,17 @@ def _extract_content(response: object) -> str:
         return ""
 
 
-def _call_configured_tag_model(messages: list, *, temperature: float) -> object:
+def _call_configured_tag_model(messages: list) -> object:
     """One attempt at the configured tag model. Never falls back to the chat model.
 
     ``agent.auxiliary_client.call_llm`` treats a capacity error as a reason to
     retry on the main agent model. That retry is the voice-note stall. This
     path resolves the task's own provider and makes a single completion.
     """
-    from agent.auxiliary_client import _get_auxiliary_task_config, resolve_provider_client
+    from agent.auxiliary_client import (
+        _get_auxiliary_task_config,
+        get_text_auxiliary_client,
+    )
 
     cfg = _get_auxiliary_task_config(AUXILIARY_TASK)
     provider = str(cfg.get("provider") or "").strip()
@@ -154,16 +157,14 @@ def _call_configured_tag_model(messages: list, *, temperature: float) -> object:
     except (TypeError, ValueError):
         configured_timeout = _TAG_ATTEMPT_TIMEOUT_S
     timeout = min(configured_timeout, _TAG_ATTEMPT_TIMEOUT_S)
-    client, resolved_model = resolve_provider_client(
-        provider=provider, model=model or "", task=AUXILIARY_TASK,
-    )
+    client, resolved_model = get_text_auxiliary_client(AUXILIARY_TASK)
     wire_model = resolved_model or model
     if client is None or not wire_model:
         raise RuntimeError("tagger model unavailable")
+    # Keep model defaults: fixed sampling and legacy token limits reject reasoning models.
     return client.chat.completions.create(
         model=wire_model,
         messages=messages,
-        temperature=temperature,
         timeout=timeout,
     )
 
@@ -190,10 +191,7 @@ def rewrite_audio_script(
 
     def _default_caller(**kwargs):
         messages = kwargs.get("messages") or []
-        return _call_configured_tag_model(
-            list(messages),
-            temperature=float(kwargs.get("temperature") or 0.2),
-        )
+        return _call_configured_tag_model(list(messages))
 
     caller: Callable[..., object] = call_llm or _default_caller
 
@@ -219,7 +217,6 @@ def rewrite_audio_script(
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": "EXACT SPEECH FOLLOWS. Do not echo this line.\n---\n" + transcript},
             ],
-            temperature=0.2,
         )
         tagged = _extract_content(response).strip()
         fenced = re.fullmatch(r"```(?:[A-Za-z0-9_-]+)?\s*(.*?)\s*```", tagged, flags=re.DOTALL)
