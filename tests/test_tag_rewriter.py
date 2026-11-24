@@ -75,14 +75,12 @@ def test_default_path_uses_one_configured_attempt(monkeypatch):
     source = "To get to the other side."
     seen = {}
 
-    def once(messages, *, temperature):
+    def once(messages):
         seen["messages"] = messages
-        seen["temperature"] = temperature
         raise RuntimeError("at capacity")
 
     monkeypatch.setattr(tag_rewriter, "_call_configured_tag_model", once)
     assert rewrite_audio_script(source, max_tags=2) == source
-    assert seen["temperature"] == 0.2
     user_prompt = next(item["content"] for item in seen["messages"] if item.get("role") == "user")
     assert user_prompt.startswith("EXACT SPEECH FOLLOWS. Do not echo this line.\n---\n")
     assert "TRANSCRIPT TO TAG:" not in user_prompt
@@ -116,10 +114,9 @@ def test_configured_attempt_does_not_call_hermes_fallback(monkeypatch):
 
     client = FakeClient()
 
-    def resolve_provider_client(**kwargs):
-        assert kwargs["provider"] == "xai-oauth"
-        assert kwargs["model"] == "grok-4.20-0309-non-reasoning"
-        return client, kwargs["model"]
+    def resolve_task(task):
+        assert task == "idealphase_elevenlabs_audio_tags"
+        return client, "grok-4.20-0309-non-reasoning"
 
     monkeypatch.setattr(
         "agent.auxiliary_client._get_auxiliary_task_config",
@@ -130,8 +127,9 @@ def test_configured_attempt_does_not_call_hermes_fallback(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "agent.auxiliary_client.resolve_provider_client",
-        resolve_provider_client,
+        "agent.auxiliary_client.get_text_auxiliary_client",
+        resolve_task,
+        raising=False,
     )
     monkeypatch.setattr(
         "agent.auxiliary_client.call_llm",
@@ -139,7 +137,7 @@ def test_configured_attempt_does_not_call_hermes_fallback(monkeypatch):
     )
 
     try:
-        tag_rewriter._call_configured_tag_model([{"role": "user", "content": "hi"}], temperature=0.2)
+        tag_rewriter._call_configured_tag_model([{"role": "user", "content": "hi"}])
     except RuntimeError as exc:
         assert "at capacity" in str(exc)
     else:
@@ -150,6 +148,35 @@ def test_configured_attempt_does_not_call_hermes_fallback(monkeypatch):
     assert client.chat.completions.calls[0]["model"] == "grok-4.20-0309-non-reasoning"
     assert "max_tokens" not in client.chat.completions.calls[0]
     assert "max_completion_tokens" not in client.chat.completions.calls[0]
+    assert "temperature" not in client.chat.completions.calls[0]
+
+
+def test_openai_alias_uses_the_task_resolver_before_tagging(monkeypatch):
+    source = "Bom, vamos conferir isso juntos?"
+    tagged = "[warmly] Bom, vamos conferir isso juntos?"
+    calls = []
+
+    def complete(**kwargs):
+        calls.append(kwargs)
+        return response(tagged)
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=complete)))
+
+    def resolve_task(task):
+        assert task == "idealphase_elevenlabs_audio_tags"
+        return client, "gpt-6-luna"
+
+    monkeypatch.setattr(
+        "agent.auxiliary_client._get_auxiliary_task_config",
+        lambda task: {"provider": "openai", "model": "gpt-6-luna", "timeout": 2},
+    )
+    monkeypatch.setattr("agent.auxiliary_client.resolve_provider_client", lambda **kwargs: (None, None))
+    monkeypatch.setattr("agent.auxiliary_client.get_text_auxiliary_client", resolve_task, raising=False)
+
+    assert rewrite_audio_script(source, max_tags=2) == tagged
+    assert len(calls) == 1
+    assert calls[0]["model"] == "gpt-6-luna"
+    assert calls[0]["timeout"] == 2
 
 
 def test_length_scaled_limit_is_bounded():
