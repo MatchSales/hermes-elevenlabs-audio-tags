@@ -143,13 +143,14 @@ def _call_configured_tag_model(messages: list) -> object:
     path resolves the task's own provider and makes a single completion.
     """
     from agent.auxiliary_client import (
+        _build_call_kwargs,
         _get_auxiliary_task_config,
-        get_text_auxiliary_client,
+        _resolve_task_provider_model,
+        resolve_provider_client,
     )
 
     cfg = _get_auxiliary_task_config(AUXILIARY_TASK)
     provider = str(cfg.get("provider") or "").strip()
-    model = str(cfg.get("model") or "").strip() or None
     if not provider or provider.lower() == "auto":
         raise RuntimeError("tagger requires an explicit auxiliary provider")
     try:
@@ -157,16 +158,24 @@ def _call_configured_tag_model(messages: list) -> object:
     except (TypeError, ValueError):
         configured_timeout = _TAG_ATTEMPT_TIMEOUT_S
     timeout = min(configured_timeout, _TAG_ATTEMPT_TIMEOUT_S)
-    client, resolved_model = get_text_auxiliary_client(AUXILIARY_TASK)
+    provider, model, base_url, api_key, api_mode = _resolve_task_provider_model(AUXILIARY_TASK)
+    client, resolved_model = resolve_provider_client(
+        provider, model=model, explicit_base_url=base_url, explicit_api_key=api_key,
+        api_mode=api_mode,
+    )
     wire_model = resolved_model or model
     if client is None or not wire_model:
         raise RuntimeError("tagger model unavailable")
-    # Keep model defaults: fixed sampling and legacy token limits reject reasoning models.
-    return client.chat.completions.create(
-        model=wire_model,
-        messages=messages,
+    # Use Hermes' provider-specific wire format and minimum supported reasoning.
+    # Tag insertion does not need the model's slower default thinking budget.
+    kwargs = _build_call_kwargs(
+        provider, wire_model, messages,
         timeout=timeout,
+        reasoning_config={"enabled": False},
+        base_url=base_url,
+        task=AUXILIARY_TASK,
     )
+    return client.chat.completions.create(**kwargs)
 
 
 def rewrite_audio_script(

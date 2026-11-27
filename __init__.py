@@ -10,13 +10,13 @@ AUXILIARY_TASK = "idealphase_elevenlabs_audio_tags"
 
 
 def register(ctx):
-    """Register the provider and a tag task that follows the user's main model."""
+    """Register the provider and its separately configured tag task."""
     ctx.register_auxiliary_task(
         key=AUXILIARY_TASK,
         display_name="IdealPhase ElevenLabs audio tags",
         description="Sparse audio-only delivery-tag enrichment for ElevenLabs",
-        # No provider or model: Hermes "auto" uses the installer's main chat
-        # model. An auxiliary.<key> override still wins.
+        # Configure an explicit auxiliary route to enable automatic tags.
+        # The rewriter also caps this timeout at three seconds.
         defaults={"timeout": 15},
     )
     ctx.register_tts_provider(ElevenLabsAudioTagsProvider(ctx.get_config))

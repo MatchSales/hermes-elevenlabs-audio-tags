@@ -58,6 +58,8 @@ def _install_agent_stub() -> None:
         raise RuntimeError("Hermes auxiliary client is not installed")
 
     setattr(auxiliary, "_get_auxiliary_task_config", _missing)
+    setattr(auxiliary, "_resolve_task_provider_model", _missing)
+    setattr(auxiliary, "_build_call_kwargs", _missing)
     setattr(auxiliary, "resolve_provider_client", _missing)
     setattr(auxiliary, "call_llm", _missing)
 
@@ -77,6 +79,8 @@ def _install_auxiliary_stub() -> None:
         raise RuntimeError("Hermes auxiliary client is not installed")
 
     setattr(auxiliary, "_get_auxiliary_task_config", _missing)
+    setattr(auxiliary, "_resolve_task_provider_model", _missing)
+    setattr(auxiliary, "_build_call_kwargs", _missing)
     setattr(auxiliary, "resolve_provider_client", _missing)
     setattr(auxiliary, "call_llm", _missing)
     agent = sys.modules.get("agent")
