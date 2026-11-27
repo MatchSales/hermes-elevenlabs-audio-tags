@@ -17,7 +17,7 @@ import tag_rewriter
     ({"provider": "custom", "model": "gpt-6-luna", "base_url": "https://voice-model.test/v1",
       "key_env": "VOICE_MODEL_KEY"}, "voice-model.test", "VOICE_MODEL_KEY"),
 ])
-@pytest.mark.parametrize("status", [200, 503])
+@pytest.mark.parametrize("status", [200, 503, "timeout"])
 def test_native_task_route_uses_its_credentials_and_one_attempt(tmp_path, monkeypatch, route, host, key_name, status):
     from agent import auxiliary_client
     from agent.secret_scope import reset_secret_scope, set_secret_scope
@@ -36,13 +36,8 @@ def test_native_task_route_uses_its_credentials_and_one_attempt(tmp_path, monkey
 
     def respond(request):
         requests.append(request)
-        assert request.url.host == host
-        assert request.headers["Authorization"] == "Bearer synthetic-profile-key"
-        body = json.loads(request.content)
-        assert body["model"] == "gpt-6-luna"
-        assert "max_tokens" not in body
-        assert "temperature" not in body
-        assert source in body["messages"][-1]["content"]
+        if status == "timeout":
+            raise httpx.ReadTimeout("synthetic timeout", request=request)
         if status != 200:
             return httpx.Response(status, json={"error": {"message": "at capacity"}})
         return httpx.Response(200, json={
@@ -64,6 +59,17 @@ def test_native_task_route_uses_its_credentials_and_one_attempt(tmp_path, monkey
     try:
         assert tag_rewriter.rewrite_audio_script(source, max_tags=2) == (tagged if status == 200 else source)
         assert len(requests) == 1
+        request = requests[0]
+        assert request.url.host == host
+        assert request.headers["Authorization"] == "Bearer synthetic-profile-key"
+        body = json.loads(request.content)
+        assert body["model"] == "gpt-6-luna"
+        assert "max_tokens" not in body
+        assert "max_completion_tokens" not in body
+        assert "temperature" not in body
+        assert body["reasoning_effort"] == "none"
+        assert "reasoning" not in body
+        assert source in body["messages"][-1]["content"]
     finally:
         reset_secret_scope(secret_scope)
         reset_hermes_home_override(home_scope)

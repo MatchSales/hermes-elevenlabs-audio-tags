@@ -60,7 +60,7 @@ your ElevenLabs account. Audio is written only to the path Hermes requests.
 
 When automatic tags are on, the untagged transcript is also sent to the model
 configured for `auxiliary.idealphase_elevenlabs_audio_tags`. If you did not
-pin one, that is your normal chat model. The tagger uses that reply only to
+pin an explicit provider, automatic enrichment is skipped. The tagger uses that reply only to
 add delivery tags. The visible chat text is not changed.
 
 This plugin does not store the key, does not phone home, and does not log the
@@ -117,13 +117,16 @@ Telegram's Opus voice-bubble format as it does for other compatible providers.
 ### Tag model
 
 Tag enrichment is its own Hermes auxiliary task,
-`auxiliary.idealphase_elevenlabs_audio_tags`. Leave provider and model unset
-and Hermes uses your normal chat model. A fresh install does not ask for a
-second login.
+`auxiliary.idealphase_elevenlabs_audio_tags`. Configure an explicit provider;
+the route uses that task's credentials and endpoint. It never falls back to
+the chat model on failure.
 
-Pin a smaller, faster model if you send a lot of voice notes. Tagging is a
-separate call, and a slow reasoning model can miss the 3-second window. Speech
-still goes out. It just goes out without tags. Pick the slot in `hermes setup`
+The tagger asks Hermes to disable reasoning using the provider's supported wire
+format, or use the minimum reasoning that model requires. This avoids spending
+the short tagging window on the model's default thinking budget. A smaller,
+faster model can still help if you send a lot of voice notes: tagging is a
+separate call and can miss the 3-second window. Speech still goes out without
+tags in that case. Pick the slot in `hermes setup`
 or `hermes model`, or set it directly:
 
 ```yaml
@@ -133,7 +136,7 @@ auxiliary:
     model: gpt-5.4-mini
 ```
 
-That block is optional. It is an example of a cheaper pin, not a requirement.
+That model is an example. The explicit provider is required for automatic tags.
 
 ## Hear the difference
 
@@ -178,7 +181,11 @@ event=elevenlabs_tagger outcome=rejected reasons=prose_changed elapsed_ms=900 ta
 
 `reasons` is one or more of `empty`, `over_cap`, `unknown_tag`, and `prose_changed`. `over_cap` means `tag_count` exceeded `tag_limit`. `unknown_tag` adds `unknown_brackets` as a count only, never the bracket text. A line can list more than one reason. The line never includes the transcript, the rewrite, the prompt, or the voice ID.
 
-The tag completion does not send `max_tokens`. It makes one non-streaming attempt. The configured timeout may lower the deadline, but cannot raise it past 3 seconds. A reply that does not finish inside that window speaks the original line as `timeout`, not a clipped rewrite. Do not infer a timeout merely because a note has no tags.
+The tag completion does not send a token cap. It makes one non-streaming attempt.
+The configured timeout may lower the deadline, but cannot raise it past 3 seconds.
+A reply that does not finish inside that window speaks the original line, not a
+clipped rewrite. Its log includes the timeout exception class. Do not infer a
+timeout merely because a note has no tags.
 
 ## Local checks
 
